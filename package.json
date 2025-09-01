@@ -10,8 +10,4 @@
     "express": "^4.18.2",
     "express-oas-generator": "^1.0.48"
   },
-  "engines": {
-    "node": "20.x"
-  },
-  "packageManager": "pnpm@8.10.0"
 }
