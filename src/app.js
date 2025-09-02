@@ -1,21 +1,17 @@
 import express from "express";
-import expressOasGenerator from "express-oas-generator";
 import usersRouter from "./routes/users.js";
+import productsRouter from "./routes/products.js";
 
 const app = express();
 app.use(express.json());
 
-// Inicializa Swagger automático
-expressOasGenerator.init(app, {
-  docsPath: "/docs",
-  exposeApiDocs: true
+// Rota raiz
+app.get("/", (req, res) => {
+  res.json({ "Documentação": "Acesse: https://apisme.vercel.app/docs" });
 });
 
 // Rotas
 app.use("/users", usersRouter);
-
-app.get("/", (req, res) => {
-  res.json([{"Documentação": "Acesse: https://github.com/davidsousadev/apisme"}]);
-});
+app.use("/products", productsRouter);
 
 export default app;
