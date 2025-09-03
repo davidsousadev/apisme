@@ -12,3 +12,6 @@ firebase_admin==7.1.0
 # HTTP requests
 httpx[http2]==0.28.1
 requests==2.32.3
+
+# Postegres
+psycopg2-binary==2.9.10

@@ -1,5 +1,5 @@
 .venv*
 node_modules
 pnpm-lock.yaml
-.env
+.env*
 *.db
