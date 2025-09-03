@@ -28,9 +28,8 @@ if not firebase_admin._apps:
 
 router = APIRouter()
 
-# Rota para enviar notificação
-@router.get("/send/{user_id}")
-def send_notification(user_id: int):
+@router.get("/send/{user_id}/{id_mensagem}")
+def send_notification(user_id: int, id_mensagem: int):
     with Session(get_engine()) as session:
         user = session.exec(select(User).where(User.id == user_id)).first()
 
@@ -39,15 +38,15 @@ def send_notification(user_id: int):
 
         registration_token = user.token
 
-        # Mensagem
+        # Mensagem com id_mensagem vindo da URL
         message = messaging.Message(
             notification=messaging.Notification(
-                title="Nova Mensagem",
-                body="Você recebeu uma nova mensagem!"
+                title="Promoção Exclusiva 🚀",
+                body=f"Produto em promoção! ID {id_mensagem}"
             ),
             data={
-                "tipo": "mensagem",
-                "id_mensagem": "789"
+                "tipo": "promocao",
+                "id_mensagem": str(id_mensagem)
             },
             android=messaging.AndroidConfig(
                 priority="high",
