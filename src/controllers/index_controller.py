@@ -2,7 +2,7 @@ from fastapi import APIRouter, status
 
 router = APIRouter()
 
-# Lista os verbos disponiveis para essecontroller
+# Lista os verbos disponiveis para esse controller
 
 @router.options("/", status_code=status.HTTP_200_OK)
 async def options_emails():
