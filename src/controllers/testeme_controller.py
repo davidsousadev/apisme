@@ -65,32 +65,45 @@ def atualizar_desafio(id: int, desafio_data: UpdateDesafioRequest):
 # SCORE
 # -----------------------------
 
-# Lista os verbos disponíveis
 @router.options("/score", status_code=status.HTTP_200_OK)
 async def options_score():
-    return {"methods": ["GET", "PUT"]}
+    return {"methods": ["GET", "PUT", "POST"]}
 
-# Obter score
+
 @router.get("/score", response_model=ScoreResponse)
 def obter_score():
     with Session(get_engine()) as session:
-        score = session.get(Score, 1)  # assumindo ID 1
+        score = session.get(Score, 1)
         if not score:
             raise HTTPException(status_code=404, detail="Score não encontrado")
         return ScoreResponse.model_validate(score)
 
-# Atualizar score
+
+@router.post("/score", response_model=ScoreResponse, status_code=status.HTTP_201_CREATED)
+def criar_score():
+    with Session(get_engine()) as session:
+        existing = session.get(Score, 1)
+        if existing:
+            raise HTTPException(status_code=400, detail="Score já existe")
+
+        score = Score(value=0)
+        session.add(score)
+        session.commit()
+        session.refresh(score)
+        return ScoreResponse.model_validate(score)
+
+
 @router.put("/score", response_model=ScoreResponse)
 def atualizar_score(score_data: UpdateScoreRequest):
     with Session(get_engine()) as session:
-        score = session.get(Score, 1)  # assumindo ID 1
+        score = session.get(Score, 1)
         if not score:
             raise HTTPException(status_code=404, detail="Score não encontrado")
 
         if score_data.value is not None:
             score.value = score_data.value
-            score.updated_at = datetime.utcnow()
 
+        score.updated_at = datetime.utcnow()
         session.add(score)
         session.commit()
         session.refresh(score)
