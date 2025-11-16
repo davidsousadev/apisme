@@ -48,3 +48,4 @@
 ```sh
   uvicorn src.main:app --reload
 ```
+ - Obs: No ambiente DEV modificar [database.py](/src/database.py)
