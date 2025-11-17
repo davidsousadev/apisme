@@ -15,6 +15,7 @@
     - [Atualiza dependências](#atualiza-dependências)
     - [Gerar requirements.txt](#gerar-requirementstxt)
     - [Rodar o projeto](#rodar-o-projeto)
+    - [Projetos](#projetos)
 
 ### Git Push
 ```sh
@@ -63,3 +64,7 @@ pip-review --auto
   uvicorn src.main:app --reload
 ```
  - Obs: No ambiente DEV modificar [database.py](/src/database.py)
+  
+### Projetos
+
+- [Testeme](https://github.com/davidsousadev/testeme)
