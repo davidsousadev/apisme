@@ -6,7 +6,7 @@ from sqlalchemy.sql import union_all
 
 from src.database import get_engine
 
-from src.models.users_models import SignInUserRequest, SignUpUserRequest, User, UpdateUserRequest, UserResponse
+from src.models.users_models import SignInUserRequest, SignUpUserRequest, UserM, UpdateUserRequest, UserResponse
 
 router = APIRouter()
 
@@ -21,7 +21,7 @@ async def options_Users():
 def listar_Users():
     
     with Session(get_engine()) as session:
-        statement = select(User)
+        statement = select(UserM)
         users = session.exec(statement).all()
         return [UserResponse.model_validate(u) for u in users]
         
@@ -34,7 +34,7 @@ async def cadastrar_users(user_data: SignUpUserRequest):
 
         # Verifica se já existe um admin, revendedor ou user com o código de confirmação de e-mail
         sttm = union_all(
-            select(User.token).where(User.token == user_data.token),
+            select(UserM.token).where(UserM.token == user_data.token),
         )
         registro_existente = session.exec(sttm).first()
 
@@ -45,7 +45,7 @@ async def cadastrar_users(user_data: SignUpUserRequest):
             )
 
         # Criação do usuário
-        user = User(
+        user = UserM(
             token=user_data.token
         )
 

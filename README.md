@@ -9,9 +9,11 @@
     - [Git Push](#git-push)
     - [Criar Venv](#criar-venv)
     - [Ativar o Venv](#ativar-o-venv)
+    - [Atualiza o pip](#atualiza-o-pip)
     - [Desativar o Venv](#desativar-o-venv)
-    - [Gerar requirements.txt](#gerar-requirementstxt)
     - [Instalar dependências](#instalar-dependências)
+    - [Atualiza dependências](#atualiza-dependências)
+    - [Gerar requirements.txt](#gerar-requirementstxt)
     - [Rodar o projeto](#rodar-o-projeto)
 
 ### Git Push
@@ -29,19 +31,31 @@
   source venv/bin/activate
 ```
 
+### Atualiza o pip
+```sh
+  pip install --upgrade pip
+
+```
+
 ### Desativar o Venv
 ```sh
   deactivate
 ```
 
-### Gerar requirements.txt
-```sh
-  pip freeze >> requirements.txt
-```
-
 ### Instalar dependências
 ```sh
   pip install -r requirements.txt
+```
+
+### Atualiza dependências
+```sh
+pip-review --auto
+
+```
+
+### Gerar requirements.txt
+```sh
+  pip freeze >> requirements.txt
 ```
 
 ### Rodar o projeto

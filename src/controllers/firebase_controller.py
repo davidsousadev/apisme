@@ -4,7 +4,7 @@ from firebase_admin import credentials, messaging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 from src.database import get_engine  # ajuste para o caminho real
-from src.models.users_models import User, UserResponse  # ajuste para o caminho real
+from src.models.users_models import UserM, UserResponse  # ajuste para o caminho real
 
 # Configuração Firebase com decouple
 firebase_config = {
@@ -31,7 +31,7 @@ router = APIRouter()
 @router.get("/send/{user_id}/{id_mensagem}")
 def send_notification(user_id: int, id_mensagem: int):
     with Session(get_engine()) as session:
-        user = session.exec(select(User).where(User.id == user_id)).first()
+        user = session.exec(select(UserM).where(UserM.id == user_id)).first()
 
         if not user:
             raise HTTPException(status_code=404, detail="Usuário não encontrado")
