@@ -1,7 +1,6 @@
 from sqlmodel import SQLModel, Field
 from typing import Optional
-from datetime import datetime
-import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel
 
 class Operacoes(SQLModel, table=True):
@@ -10,7 +9,8 @@ class Operacoes(SQLModel, table=True):
     valor: int  # mudança: +10, -4, +20 etc.
     tipo: str   # ganho, perda, bonificação, punição...
     descricao: Optional[str] = None
-    created_at: str = Field(default=datetime.datetime.now().strftime('%Y-%m-%d'))
+    # ✅ Hora UTC timezone-aware
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class CreateOperacaoRequest(BaseModel):
@@ -26,7 +26,7 @@ class OperacoesResponse(BaseModel):
     valor: int
     tipo: str
     descricao: Optional[str]
-    created_at: str = Field(default=datetime.datetime.now().strftime('%Y-%m-%d'))
+    created_at: datetime
 
     class Config:
         from_attributes = True

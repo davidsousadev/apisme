@@ -1,270 +1,208 @@
 import jwt
-import string
-import random
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import datetime, timedelta, timezone
+from typing import Annotated
+from sqlmodel import Session, select
 from passlib.context import CryptContext
-from typing import Annotated
-from sqlmodel import Session, select
 
 from src.database import get_engine
-from src.auth_utils import get_logged_user, hash_password, SECRET_KEY, ALGORITHM, ACCESS_EXPIRES, REFRESH_EXPIRES
+from src.auth_utils import (
+    get_logged_user,
+    hash_password,
+    SECRET_KEY,
+    ALGORITHM,
+    ACCESS_EXPIRES,
+    REFRESH_EXPIRES
+)
 
-from src.models.testeme_user_models import SignInUserRequest, SignUpUserRequest, User, UpdateUserRequest
+from src.models.testeme_user_models import (
+    SignInUserRequest,
+    SignUpUserRequest,
+    User
+)
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlmodel import Session, select
-from typing import Annotated
-from sqlalchemy.sql import union_all
-from datetime import datetime
+from src.models.testeme_desafio_models import (
+    CreateDesafioRequest,
+    DesafioResponse,
+    Desafio
+)
 
-from src.database import get_engine
-from src.models.testeme_desafio_models import CreateDesafioRequest, DesafioResponse, Desafio, UpdateDesafioRequest
-from src.models.testeme_operacoes_models import Operacoes, CreateOperacaoRequest, OperacoesResponse
+from src.models.testeme_operacoes_models import (
+    Operacoes,
+    OperacoesResponse
+)
 
 router = APIRouter()
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# -----------------------------
-# Users
-# -----------------------------
+# =============================
+# USERS
+# =============================
 
-# Gera codigo com 6 caracteres para confirmação
-def gerar_codigo_confirmacao(tamanho=6):
-        """Gera um código aleatório de confirmação."""
-        caracteres = string.ascii_letters + string.digits
-        return ''.join(random.choices(caracteres, k=tamanho))
- 
-# Cadastro de Users
 @router.post('/cadastrar', status_code=status.HTTP_201_CREATED)
 async def cadastrar_users(user_data: SignUpUserRequest):
     with Session(get_engine()) as session:
+        user_exists = session.exec(
+            select(User).where(User.nick == user_data.nick)
+        ).first()
 
-        # Verifica se já existe um User com o mesmo nick
-        sttm = select(User.nick).where(User.nick == user_data.nick)
-        nick_existente = session.exec(sttm).first()
+        if user_exists:
+            raise HTTPException(status_code=400, detail='Nick já cadastrado!')
 
-        if nick_existente:
-            raise HTTPException(
-                status_code=status.HTTP_200_OK,
-                detail='Nick já cadastrado anteriormente!'
-            )
-
-        # Hash da senha
-        hash = hash_password(user_data.password)       
-
-        # Criação do usuário e user
         user = User(
             nome=user_data.nome,
-            nick=user_data.nick, 
-            score=0,
-            password=hash
+            nick=user_data.nick,
+            password=hash_password(user_data.password),
+            score=0
         )
-    
+
         session.add(user)
         session.commit()
-        session.refresh(user)
-        
+
         return {"detail": "Usuário cadastrado com sucesso!"}
 
-# Login de Users
+
 @router.post('/logar')
-def logar_Users(signin_data: SignInUserRequest):
-  with Session(get_engine()) as session:
-    # pegar usuário por nick
-    
-    sttm = select(User).where(User.nick == signin_data.nick)
-    user = session.exec(sttm).first()
-    
-    if not user: # não encontrou usuário
-      raise HTTPException(status_code=status.HTTP_200_OK, 
-        detail='Nick invalido!')
-    
-    # encontrou, então verificar a senha
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    
-    is_correct = pwd_context.verify(signin_data.password, user.password)
-
-    if not is_correct:
-      raise HTTPException(
-        status_code=status.HTTP_200_OK, 
-        detail='Senha incorrenta!')
-    
-    
-    # Tá tudo OK pode gerar um Token JWT e devolver
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_EXPIRES)
-    access_token = jwt.encode({'sub': user.nick, 'exp': expires_at}, key=SECRET_KEY, algorithm=ALGORITHM)
-
-    expires_rt = datetime.now(timezone.utc) + timedelta(minutes=REFRESH_EXPIRES)
-    refresh_token = jwt.encode({'sub': user.nick, 'exp': expires_rt}, key=SECRET_KEY, algorithm=ALGORITHM)
-    
-    return {'access_token': access_token, 'refresh_token': refresh_token}
-
-# Autentica Users
-@router.get("/autenticar")
-def autenticar_Users(user: Annotated[User, Depends(get_logged_user)]):
-  return user
-
-# Atualiza Users
-@router.patch("/atualizar", status_code=status.HTTP_200_OK)
-def atualizar_Users_por(
-    user_data: UpdateUserRequest, 
-    user: Annotated[User, Depends(get_logged_user)]):
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_200_OK,
-            detail="Acesso negado!"
-        )
-
+def logar_users(signin_data: SignInUserRequest):
     with Session(get_engine()) as session:
-        sttm = select(User).where(User.id == user.id)
-        user_to_update = session.exec(sttm).first()
+        user = session.exec(
+            select(User).where(User.nick == signin_data.nick)
+        ).first()
 
-        if not user_to_update:
-            raise HTTPException(
-                status_code=status.HTTP_200_OK,
-                detail="Usuário não encontrado."
-            )
+        if not user:
+            raise HTTPException(status_code=400, detail='Nick inválido!')
 
-        # Atualizar os campos fornecidos
-        if user_data.nome and user_to_update.nome != user_data.nome:
-            user_to_update.nome = user_data.nome           
-        if user_data.nick and user_to_update.nick != user_data.nick:
-            # Verifica se já existe um admin, revendedor ou User com o código de confirmação de e-mail
-            sttm = select(User).where(User.nick == user_data.nick
-            )
-            registro_existente = session.exec(sttm).first()
+        if not pwd_context.verify(signin_data.password, user.password):
+            raise HTTPException(status_code=400, detail='Senha incorreta!')
 
-            if registro_existente:
-                raise HTTPException(
-                    status_code=status.HTTP_200_OK,
-                    detail='Nick já cadastrado anteriormente. Tente recuperar o nick!'
-                )
+        agora = datetime.now(timezone.utc)
 
-        if user_data.password and user_to_update.password != hash_password(user_data.password):
-            user_to_update.password = hash_password(user_data.password)
-            
-        # Salvar as alterações no banco de dados
-        session.add(user_to_update)
-        session.commit()
-        session.refresh(user_to_update)
+        access_expires = agora + timedelta(minutes=ACCESS_EXPIRES)
+        refresh_expires = agora + timedelta(minutes=REFRESH_EXPIRES)
 
-        return {"message": "Usuário atualizado com sucesso!", "user": user_to_update}
+        access_token = jwt.encode({'sub': user.nick, 'exp': access_expires}, SECRET_KEY, algorithm=ALGORITHM)
+        refresh_token = jwt.encode({'sub': user.nick, 'exp': refresh_expires}, SECRET_KEY, algorithm=ALGORITHM)
 
-# -----------------------------
+        return {'access_token': access_token, 'refresh_token': refresh_token}
+
+
+@router.get("/autenticar")
+def autenticar_users(user: Annotated[User, Depends(get_logged_user)]):
+    return user
+
+
+# =============================
 # DESAFIOS
-# -----------------------------
+# =============================
 
-# Lista os verbos disponíveis
-@router.options("/desafios", status_code=status.HTTP_200_OK)
-async def options_desafios():
-    return {"methods": ["GET", "POST", "PUT"]}
-
-# Listar todos os desafios
 @router.get("/desafios", response_model=list[DesafioResponse])
 def listar_desafios():
     with Session(get_engine()) as session:
-        statement = select(Desafio)
-        desafios = session.exec(statement).all()
+        desafios = session.exec(select(Desafio)).all()
         return [DesafioResponse.model_validate(d) for d in desafios]
 
-# Criar novo desafio
-@router.post("/desafios", status_code=status.HTTP_201_CREATED)
+
+@router.post("/desafios", response_model=DesafioResponse, status_code=status.HTTP_201_CREATED)
 def criar_desafio(desafio_data: CreateDesafioRequest):
     with Session(get_engine()) as session:
         desafio = Desafio(
             title=desafio_data.title,
-            desc=desafio_data.desc,
-            created_at=datetime.utcnow()
+            desc=desafio_data.desc
+            # created_at já é UTC timezone-aware pelo model
         )
+
         session.add(desafio)
         session.commit()
         session.refresh(desafio)
+
         return DesafioResponse.model_validate(desafio)
 
-# Atualizar desafio existente
-@router.put("/desafios/{id}", response_model=DesafioResponse)
-def atualizar_desafio(id: int, desafio_data: UpdateDesafioRequest):
+
+# =============================
+# COLETAR RECOMPENSA
+# =============================
+
+@router.post("/desafios/{id}/coletar")
+def coletar_recompensa(
+    id: int,
+    user: Annotated[User, Depends(get_logged_user)]
+):
     with Session(get_engine()) as session:
         desafio = session.get(Desafio, id)
+
         if not desafio:
             raise HTTPException(status_code=404, detail="Desafio não encontrado")
 
-        if desafio_data.title:
-            desafio.title = desafio_data.title
-        if desafio_data.desc:
-            desafio.desc = desafio_data.desc
+        # 🚫 Impede coleta duplicada
+        if desafio.coletado:
+            raise HTTPException(status_code=200, detail="Recompensa já coletada.")
 
-        session.add(desafio)
+        agora = datetime.now(timezone.utc)
+
+        # Garantia de timezone consistente
+        created_at_utc = desafio.created_at
+        if created_at_utc.tzinfo is None:
+            # assume que veio do servidor local (UTC-3) e converte
+            from datetime import timedelta
+            created_at_utc = created_at_utc.replace(tzinfo=timezone(timedelta(hours=-3))).astimezone(timezone.utc)
+
+        # Calcula tempo passado
+        tempo_passado = (agora - created_at_utc).total_seconds()
+
+        print("Criado (UTC):", created_at_utc)
+        print("Agora (UTC):", agora)
+
+        # 🚫 Expirou após 4 minutos (240s)
+        if tempo_passado >= 240:
+            raise HTTPException(status_code=400, detail="Tempo expirado! Nenhuma recompensa disponível.")
+
+        # 🎯 Pontuação linear 100 → 0
+        pontos = max(int(100 - (tempo_passado / 240) * 100), 0)
+
+        # Atualiza usuário
+        db_user = session.exec(select(User).where(User.nick == user.nick)).first()
+        if not db_user:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+        db_user.score += pontos
+        desafio.coletado = True
+
+        # Registrar operação
+        nova_operacao = Operacoes(
+            nick=user.nick,
+            valor=pontos,
+            tipo="recompensa",
+            descricao=f"Recompensa do desafio {desafio.title}"
+        )
+
+        session.add_all([nova_operacao, db_user, desafio])
         session.commit()
-        session.refresh(desafio)
-        return DesafioResponse.model_validate(desafio)
+
+        return {
+            "message": "Recompensa coletada com sucesso!",
+            "pontos_ganhos": pontos,
+            "novo_score": db_user.score,
+            "tempo_passado_segundos": int(tempo_passado)
+        }
 
 
-# -----------------------------
-# SCORE
-# -----------------------------
-
-@router.options("/operacoes", status_code=status.HTTP_200_OK)
-async def options_score():
-    return {"methods": ["GET", "POST"]}
+# =============================
+# OPERACOES
+# =============================
 
 @router.get("/operacoes", response_model=list[OperacoesResponse])
-def listar_operacoes(nick: str, user: Annotated[User, Depends(get_logged_user)]):
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_200_OK,
-            detail="Acesso negado!"
-        )
-    with Session(get_engine()) as session:
+def listar_operacoes(
+    nick: str,
+    user: Annotated[User, Depends(get_logged_user)]
+):
+    if nick != user.nick:
+        raise HTTPException(status_code=403, detail="Você não pode acessar operações de outro usuário")
 
-        sttm = (
+    with Session(get_engine()) as session:
+        operacoes = session.exec(
             select(Operacoes)
             .where(Operacoes.nick == nick)
             .order_by(Operacoes.created_at.desc())
-        )
+        ).all()
 
-        operacoes = session.exec(sttm).all()
-        if not operacoes:
-            raise HTTPException(status_code=200, detail="Nenhuma operacão encontrada!")
-        
         return [OperacoesResponse.model_validate(op) for op in operacoes]
-
-
-@router.post("/operacoes", response_model=OperacoesResponse, status_code=201)
-def criar_operacao(operacao: CreateOperacaoRequest, user: Annotated[User, Depends(get_logged_user)]):
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_200_OK,
-            detail="Acesso negado!"
-        )
-
-    with Session(get_engine()) as session:
-
-        # Buscar o usuário
-        sttm = select(User).where(User.nick == operacao.nick)
-        user = session.exec(sttm).first()
-
-        if not user:
-            raise HTTPException(status_code=200, detail="Usuário não encontrado")
-
-        # Criar operação
-        nova_op = Operacoes(
-            nick=operacao.nick,
-            valor=operacao.valor,
-            tipo=operacao.tipo,
-            descricao=operacao.descricao
-        )
-        session.add(nova_op)
-
-        # Atualizar score total do usuário
-        user.score += operacao.valor
-        session.add(user)
-
-        # Salvar tudo
-        session.commit()
-        session.refresh(nova_op)
-
-        return OperacoesResponse.model_validate(nova_op)

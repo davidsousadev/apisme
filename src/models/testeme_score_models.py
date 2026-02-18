@@ -1,7 +1,6 @@
 from typing import Optional
 from pydantic import BaseModel
-from datetime import datetime
-import datetime
+from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field
 
 # ---------------------------
@@ -20,13 +19,13 @@ class UpdateScoreRequest(BaseModel):
 
 class Score(BaseScore, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    updated_at: str = Field(default=datetime.datetime.now().strftime('%Y-%m-%d'))
-
+    # ✅ Atualização UTC timezone-aware
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ScoreResponse(BaseModel):
     id: int
     value: int
-    updated_at: str = Field(default=datetime.datetime.now().strftime('%Y-%m-%d'))
+    updated_at: datetime
 
     class Config:
         from_attributes = True
