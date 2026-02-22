@@ -1,7 +1,8 @@
 from typing import Optional
 from datetime import datetime, timezone
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer, field_validator
 from sqlmodel import SQLModel, Field
+
 
 # ============================
 # DESAFIO
@@ -30,8 +31,14 @@ class Desafio(BaseDesafio, table=True):
         nullable=False
     )
 
-    # ✅ Indica se a recompensa já foi coletada
     coletado: bool = Field(default=False, nullable=False)
+
+    @field_validator("created_at")
+    @classmethod
+    def ensure_timezone(cls, value: datetime):
+        if value.tzinfo is None:
+            raise ValueError("created_at must be timezone-aware")
+        return value
 
 
 class DesafioResponse(BaseModel):
@@ -43,3 +50,7 @@ class DesafioResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
