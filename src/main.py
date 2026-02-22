@@ -6,7 +6,10 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from .controllers.index_controller import router as index_router
 from .controllers.users_controller import router as user_router
 from .controllers.firebase_controller import router as firebase_router
-from .controllers.testeme_controller import router as testeme_router
+from .controllers.testeme.testeme_users_controller import router as users_router
+from .controllers.testeme.testeme_desafios_controller import router as desafios_router
+from .controllers.testeme.testeme_coleta_controller import router as coleta_router
+from .controllers.testeme.testeme_operacoes_controller import router as operacoes_router
 
 from .database import init_db
 
@@ -39,7 +42,10 @@ def create_app():
     app.include_router(index_router, prefix="", tags=["root"])
     app.include_router(user_router, prefix="/users", tags=["Users"])
     app.include_router(firebase_router, prefix="/fire", tags=["Firebase"])
-    app.include_router(testeme_router, prefix="/testeme", tags=["Teste Me - Seu desafio diário"])
+    app.include_router(users_router, prefix="/testeme", tags=["Teste Me - Seu desafio diário"])
+    app.include_router(desafios_router, prefix="/testeme", tags=["Teste Me - Seu desafio diário"])
+    app.include_router(coleta_router, prefix="/testeme", tags=["Teste Me - Seu desafio diário"])
+    app.include_router(operacoes_router, prefix="/testeme", tags=["Teste Me - Seu desafio diário"])
     # Inicialização do banco de dados
     init_db()
 
