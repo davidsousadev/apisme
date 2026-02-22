@@ -146,10 +146,14 @@ def coletar_recompensa(
 
         agora = datetime.now(timezone.utc)
 
-        # ✅ Cálculo direto (UTC - UTC)
-        tempo_passado = (agora - desafio.created_at).total_seconds()
-
-        # 🔒 Proteção contra valores negativos (clock skew)
+        created_at = desafio.created_at
+        
+        # Se o banco devolver naive, assumimos UTC
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        
+        tempo_passado = (agora - created_at).total_seconds()
+        
         if tempo_passado < 0:
             tempo_passado = 0
 
