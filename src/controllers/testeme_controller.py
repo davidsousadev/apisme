@@ -135,32 +135,40 @@ def coletar_recompensa(
 
         # 🚫 Impede coleta duplicada
         if desafio.coletado:
-            raise HTTPException(status_code=200, detail="Recompensa já coletada.")
+            raise HTTPException(status_code=400, detail="Recompensa já coletada.")
+
+        # 🔒 Garantia absoluta de UTC
+        if desafio.created_at.tzinfo is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Erro interno: created_at não é timezone-aware"
+            )
 
         agora = datetime.now(timezone.utc)
 
-        # Garantia de timezone consistente
-        created_at_utc = desafio.created_at
-        if created_at_utc.tzinfo is None:
-            # assume que veio do servidor local (UTC-3) e converte
-            from datetime import timedelta
-            created_at_utc = created_at_utc.replace(tzinfo=timezone(timedelta(hours=-3))).astimezone(timezone.utc)
+        # ✅ Cálculo direto (UTC - UTC)
+        tempo_passado = (agora - desafio.created_at).total_seconds()
 
-        # Calcula tempo passado
-        tempo_passado = (agora - created_at_utc).total_seconds()
+        # 🔒 Proteção contra valores negativos (clock skew)
+        if tempo_passado < 0:
+            tempo_passado = 0
 
-        print("Criado (UTC):", created_at_utc)
-        print("Agora (UTC):", agora)
-
-        # 🚫 Expirou após 4 minutos (240s)
+        # 🚫 Expirou após 240 segundos
         if tempo_passado >= 240:
-            raise HTTPException(status_code=400, detail="Tempo expirado! Nenhuma recompensa disponível.")
+            raise HTTPException(
+                status_code=400,
+                detail="Tempo expirado! Nenhuma recompensa disponível."
+            )
 
-        # 🎯 Pontuação linear 100 → 0
-        pontos = max(int(100 - (tempo_passado / 240) * 100), 0)
+        # 🎯 Pontuação linear (100 → 0)
+        pontos = int(100 * (1 - (tempo_passado / 240)))
+        pontos = max(pontos, 0)
 
         # Atualiza usuário
-        db_user = session.exec(select(User).where(User.nick == user.nick)).first()
+        db_user = session.exec(
+            select(User).where(User.nick == user.nick)
+        ).first()
+
         if not db_user:
             raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
@@ -172,7 +180,8 @@ def coletar_recompensa(
             nick=user.nick,
             valor=pontos,
             tipo="recompensa",
-            descricao=f"Recompensa do desafio {desafio.title}"
+            descricao=f"Recompensa do desafio {desafio.title}",
+            created_at=datetime.now(timezone.utc)
         )
 
         session.add_all([nova_operacao, db_user, desafio])
