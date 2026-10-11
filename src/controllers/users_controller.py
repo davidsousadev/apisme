@@ -1,63 +1,94 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import Annotated
+from fastapi import APIRouter, HTTPException, status
 from sqlmodel import Session, select
-from sqlalchemy import or_
-from sqlalchemy.sql import union_all
+from sqlalchemy.exc import IntegrityError
 
 from src.database import get_engine
-
-from src.models.users_models import SignInUserRequest, SignUpUserRequest, UserM, UpdateUserRequest, UserResponse
+from src.models.users_models import (
+    SignInUserRequest, SignUpUserRequest, UserM, UpdateUserRequest, UserResponse,
+)
+from src.models.aluno_models import AlunoDispositivo
 
 router = APIRouter()
 
 
-# Lista os verbos disponiveis para esse controller
 @router.options("", status_code=status.HTTP_200_OK)
 async def options_Users():
-    return { "methods": ["GET", "POST", "PATCH"] }
+    return {"methods": ["GET", "POST", "PATCH"]}
 
-# Listar Users
+
 @router.get("/", response_model=list[UserResponse])
 def listar_Users():
-    
     with Session(get_engine()) as session:
-        statement = select(UserM)
-        users = session.exec(statement).all()
-        return [UserResponse.model_validate(u) for u in users]
-        
-        
-        
-# Cadastro de Users
-@router.post('/cadastrar', status_code=status.HTTP_201_CREATED)
-async def cadastrar_users(user_data: SignUpUserRequest):
-    with Session(get_engine()) as session:
+        users = session.exec(select(UserM)).all()
+        return [UserResponse.model_validate(user) for user in users]
 
-        # Verifica se já existe um admin, revendedor ou user com o código de confirmação de e-mail
-        sttm = union_all(
-            select(UserM.token).where(UserM.token == user_data.token),
-        )
-        registro_existente = session.exec(sttm).first()
 
-        if registro_existente:
-            raise HTTPException(
-                status_code=status.HTTP_200_OK,
-                detail='Token Já cadastrado'
+def _migrar_vinculos(session: Session, user_anterior: UserM, user_atual: UserM) -> int:
+    """Move as associações do token antigo para o registro do token atual."""
+    migrados = 0
+    links = session.exec(
+        select(AlunoDispositivo).where(AlunoDispositivo.user_id == user_anterior.id)
+    ).all()
+    for link in links:
+        existente = session.exec(
+            select(AlunoDispositivo).where(
+                AlunoDispositivo.aluno_id == link.aluno_id,
+                AlunoDispositivo.user_id == user_atual.id,
             )
+        ).first()
+        if existente:
+            session.delete(link)
+        else:
+            link.user_id = user_atual.id
+            session.add(link)
+            migrados += 1
+    return migrados
 
-        # Criação do usuário
-        user = UserM(
-            token=user_data.token
-        )
 
+@router.post("/cadastrar", status_code=status.HTTP_201_CREATED)
+def cadastrar_users(user_data: SignUpUserRequest):
+    """Registra o token FCM sem interromper clientes antigos.
 
-        if user:
-            session.add(user)
+    Quando token_anterior for informado, atualiza o registro antigo (ou transfere
+    vínculos caso o token novo já esteja cadastrado), mantendo notificações ativas.
+    """
+    token = user_data.token.strip()
+    if not token:
+        raise HTTPException(status_code=422, detail="Token FCM obrigatório.")
+
+    with Session(get_engine()) as session:
+        atual = session.exec(select(UserM).where(UserM.token == token)).first()
+        anterior = None
+        if user_data.token_anterior and user_data.token_anterior.strip() != token:
+            anterior = session.exec(
+                select(UserM).where(UserM.token == user_data.token_anterior.strip())
+            ).first()
+
+        if anterior and anterior.id != (atual.id if atual else None):
+            if atual:
+                _migrar_vinculos(session, anterior, atual)
+                session.delete(anterior)
+                session.commit()
+                return {"detail": "Token atualizado; vínculos preservados.", "id": atual.id}
+            anterior.token = token
+            session.add(anterior)
+            session.commit()
+            session.refresh(anterior)
+            return {"detail": "Token atualizado; vínculos preservados.", "id": anterior.id}
+
+        if atual:
+            return {"detail": "Token Já cadastrado", "id": atual.id}
+
+        user = UserM(token=token)
+        session.add(user)
+        try:
             session.commit()
             session.refresh(user)
-
-            return {"detail": "Token Cadastrado com sucesso."}
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Erro ao casatrar token."
-        )
+        except IntegrityError:
+            session.rollback()
+            # Concorrência: outra requisição pode ter registrado o mesmo token.
+            registro = session.exec(select(UserM).where(UserM.token == token)).first()
+            if registro:
+                return {"detail": "Token Já cadastrado", "id": registro.id}
+            raise HTTPException(status_code=500, detail="Não foi possível registrar o token FCM.")
+        return {"detail": "Token Cadastrado com sucesso.", "id": user.id}

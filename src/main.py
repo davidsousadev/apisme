@@ -7,8 +7,9 @@ from .controllers.index_controller import router as index_router
 from .controllers.users_controller import router as user_router
 from .controllers.firebase_controller import router as firebase_router
 from .controllers.alunos_controller import router as alunos_router
+from .controllers.presencas_controller import router as presencas_router
 # Importa o modelo para registrar a tabela no SQLModel.metadata antes do init_db.
-from .models.aluno_models import Aluno  # noqa: F401
+from .models.aluno_models import Aluno, AlunoDispositivo, EventoPresenca  # noqa: F401
 from .controllers.testeme.testeme_users_controller import router as users_router
 from .controllers.testeme.testeme_desafios_controller import router as desafios_router
 from .controllers.testeme.testeme_coleta_controller import router as coleta_router
@@ -21,8 +22,8 @@ def create_app():
     # Inicializa a aplicação
     app = FastAPI(
         title="APIS ME",
-        description="API para gerenciar todas as operações de testes de sistemas",
-        version="1.0.0",
+        description="API central APIS ME: serviços gerais, Teste Me e notificações escolares do CEMAB App.",
+        version="1.1.0",
     )
 
     # Configuração de CORS
@@ -46,6 +47,7 @@ def create_app():
     app.include_router(user_router, prefix="/users", tags=["Users"])
     app.include_router(firebase_router, prefix="/fire", tags=["Firebase"])
     app.include_router(alunos_router, prefix="/alunos", tags=["CEMAB App - Alunos"])
+    app.include_router(presencas_router, prefix="/presencas", tags=["CEMAB App - Presenças e notificações"])
     app.include_router(users_router, prefix="/testeme", tags=["Teste Me - Seu desafio diário"])
     app.include_router(desafios_router, prefix="/testeme", tags=["Teste Me - Seu desafio diário"])
     app.include_router(coleta_router, prefix="/testeme", tags=["Teste Me - Seu desafio diário"])

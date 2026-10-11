@@ -1,38 +1,38 @@
-from pydantic import BaseModel, Field
-from datetime import datetime
-import datetime
+from pydantic import BaseModel, Field as PydanticField
 from sqlmodel import SQLModel, Field
-
+from typing import Optional
 
 
 class BaseUser(SQLModel):
-  token: str
+    token: str
 
-# Criar User include BaseUser
-class SignUpUserRequest(BaseUser): 
-  pass
 
-# Retorno dos dados
+class SignUpUserRequest(BaseUser):
+    # Optional para manter clientes antigos compatíveis. Ao renovar token,
+    # permite que a API mova os vínculos do token antigo para o novo.
+    token_anterior: Optional[str] = None
+
+
 class UserData(BaseUser):
-  pass
-
-# Include Users
-class IncludeUser(BaseUser): 
-  pass
+    pass
 
 
-# Tabela Users  
+class IncludeUser(BaseUser):
+    pass
+
+
 class UserM(IncludeUser, table=True):
-  id: int = Field(default=None, primary_key=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
 
-# Login
+
 class SignInUserRequest(SQLModel):
-  pass
+    pass
+
 
 class UpdateUserRequest(BaseModel):
     pass
 
-# Lista de usuarios
+
 class UserResponse(BaseModel):
     id: int
     token: str

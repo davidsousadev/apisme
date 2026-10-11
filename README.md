@@ -1,75 +1,32 @@
-# apisme
+# APIS ME
 
-## Api para meus projetos pessoais
+API FastAPI/SQLModel para projetos pessoais. Além dos endpoints existentes de usuários, Firebase e Teste Me, inclui o fluxo de vínculo e presença do **CEMAB App**.
 
-### Sumario
-- [apisme](#apisme)
-  - [Api para meus projetos pessoais](#api-para-meus-projetos-pessoais)
-    - [Sumario](#sumario)
-    - [Git Push](#git-push)
-    - [Criar Venv](#criar-venv)
-    - [Ativar o Venv](#ativar-o-venv)
-    - [Atualiza o pip](#atualiza-o-pip)
-    - [Desativar o Venv](#desativar-o-venv)
-    - [Instalar dependências](#instalar-dependências)
-    - [Atualiza dependências](#atualiza-dependências)
-    - [Gerar requirements.txt](#gerar-requirementstxt)
-    - [Rodar o projeto](#rodar-o-projeto)
-    - [Projetos](#projetos)
+## Configuração e execução local
 
-### Git Push
-```sh
-  git add . && git commit -m "add " && git push
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # preencha os valores reais; nunca comite o .env
+uvicorn src.main:app --reload
 ```
 
-### Criar Venv
-```sh
-  python3 -m venv venv
-```
+Configure `DATABASE_URL` com um banco persistente no ambiente de produção, todas as variáveis de Firebase Admin, `ALUNOS_ADMIN_TOKEN` e `CEMAB_EVENT_TOKEN`. Não use SQLite local efêmero em um ambiente serverless como banco definitivo.
 
-### Ativar o Venv
-```sh
-  source venv/bin/activate
-```
+## CEMAB App
 
-### Atualiza o pip
-```sh
-  pip install --upgrade pip
+Veja [`README-CEMAB-ALUNOS.md`](README-CEMAB-ALUNOS.md) para os contratos completos. Principais rotas:
 
-```
+- `POST /users/cadastrar`: cadastro do token FCM; preserva compatibilidade e migra associações quando recebe `token_anterior`.
+- `POST /alunos/vincular`: valida matrícula e nome e relaciona o dispositivo ao aluno.
+- `POST /alunos/desvincular`: remove a associação entre este token e o aluno.
+- `POST /alunos/importar` e `POST /alunos/cadastrar`: operações administrativas protegidas por `X-Admin-Token`.
+- `POST /presencas/evento` e `POST /presencas/eventos`: webhook protegido por `X-CEMAB-Event-Token`, envia push somente a dispositivos vinculados ao aluno e deduplica eventos.
+- `GET /presencas/historico`: fornece ao app o histórico associado ao token por meio do cabeçalho `X-FCM-Token`.
 
-### Desativar o Venv
-```sh
-  deactivate
-```
+A automação que trata o relatório Control iD será construída separadamente. A API recebe JSON de eventos já tratados; não lê planilhas nem corrige os timestamps de origem.
 
-### Instalar dependências
-```sh
-  pip install -r requirements.txt
-```
+## Testes de configuração
 
-### Atualiza dependências
-```sh
-pip-review --auto
-
-```
-
-### Gerar requirements.txt
-```sh
-  pip freeze >> requirements.txt
-```
-
-### Rodar o projeto
-```sh
-  uvicorn src.main:app --reload
-```
- - Obs: No ambiente DEV modificar [database.py](/src/database.py)
-  
-### Projetos
-
-- [Testeme](https://github.com/davidsousadev/testeme)
-## CEMAB App — vínculo de alunos
-
-Consulte [`README-CEMAB-ALUNOS.md`](README-CEMAB-ALUNOS.md) para os novos endpoints de validação/cadastro/importação de alunos, configuração do `ALUNOS_ADMIN_TOKEN` e implantação.
-
-**Antes de publicar:** configure `DATABASE_URL` para um banco persistente em produção, as variáveis de ambiente Firebase já utilizadas pelo projeto e `ALUNOS_ADMIN_TOKEN`. A tabela de alunos começa vazia e deve ser preenchida com a lista oficial fornecida pela escola.
+Depois de publicar, confirme `/alunos/health`, importe o cadastro oficial, vincule um dispositivo num telefone com permissões FCM habilitadas e envie um evento de teste usando o segredo de webhook. Nunca exponha o segredo administrativo, o segredo do webhook ou as credenciais do Firebase.

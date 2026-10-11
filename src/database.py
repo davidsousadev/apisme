@@ -46,7 +46,7 @@ def init_db():
     from src.models.testeme_desafio_models import Desafio  # noqa: F401
     from src.models.testeme_operacoes_models import Operacoes  # noqa: F401
     from src.models.testeme_score_models import Score  # noqa: F401
-    from src.models.aluno_models import Aluno  # noqa: F401
+    from src.models.aluno_models import Aluno, AlunoDispositivo, EventoPresenca  # noqa: F401
 
     SQLModel.metadata.create_all(get_engine())
     print("Banco de dados inicializado com sucesso!")
