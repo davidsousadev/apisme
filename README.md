@@ -68,3 +68,8 @@ pip-review --auto
 ### Projetos
 
 - [Testeme](https://github.com/davidsousadev/testeme)
+## CEMAB App — vínculo de alunos
+
+Consulte [`README-CEMAB-ALUNOS.md`](README-CEMAB-ALUNOS.md) para os novos endpoints de validação/cadastro/importação de alunos, configuração do `ALUNOS_ADMIN_TOKEN` e implantação.
+
+**Antes de publicar:** configure `DATABASE_URL` para um banco persistente em produção, as variáveis de ambiente Firebase já utilizadas pelo projeto e `ALUNOS_ADMIN_TOKEN`. A tabela de alunos começa vazia e deve ser preenchida com a lista oficial fornecida pela escola.

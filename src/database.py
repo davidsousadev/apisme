@@ -1,57 +1,52 @@
-from sqlmodel import create_engine, SQLModel
+import os
+from functools import lru_cache
+
 from decouple import config
+from sqlmodel import SQLModel, create_engine
 
+
+@lru_cache(maxsize=1)
 def get_engine():
+    """Cria e reutiliza o engine do banco de dados.
+
+    Em produção, configure DATABASE_URL. Também aceita as variáveis DB_*
+    usadas anteriormente pelo projeto. Sem configuração, usa SQLite local.
     """
-    # SQLite
-    sqlite_url = 'sqlite:///apisme.db'
-    engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
-    # print("Conectado ao SQLite local.")
-    return engine
+    database_url = config("DATABASE_URL", default="").strip()
 
+    if database_url:
+        # Alguns provedores ainda fornecem postgres:// em vez de postgresql://.
+        if database_url.startswith("postgres://"):
+            database_url = "postgresql://" + database_url[len("postgres://"): ]
+        connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+        return create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
 
-"""    
-    # PostgreSQL
-    try:
-        user = config('DB_USERNAME')
-        password = config('DB_PASSWORD')
-        db_name = config('DB_NAME')
-        host = config('DB_HOST')
-        port = config('DB_PORT')
-        postgres_url = f'postgresql://{user}:{password}@{host}:{port}/{db_name}?sslmode=require'
-        engine = create_engine(postgres_url)
-        engine.connect().close()
-        # print("Conectado ao PostgreSQL com sucesso.")
-        return engine
-    except Exception as e:
-        print(f"Falha ao conectar ao PostgreSQL: {e}")
+    db_username = config("DB_USERNAME", default="")
+    db_password = config("DB_PASSWORD", default="")
+    db_name = config("DB_NAME", default="")
+    db_host = config("DB_HOST", default="")
+    db_port = config("DB_PORT", default="5432")
+    if all([db_username, db_password, db_name, db_host]):
+        from sqlalchemy.engine import URL
+        url = URL.create(
+            "postgresql+psycopg2", username=db_username, password=db_password,
+            host=db_host, port=int(db_port), database=db_name,
+            query={"sslmode": "require"},
+        )
+        return create_engine(url, pool_pre_ping=True)
 
+    sqlite_url = config("SQLITE_URL", default="sqlite:///apisme.db")
+    return create_engine(sqlite_url, connect_args={"check_same_thread": False} if sqlite_url.startswith("sqlite") else {}, pool_pre_ping=True)
 
-
-
-
-
-"""
-    # MySQL
-    try:
-        user = config('MYSQL_USERNAME', default=user)
-        password = config('MYSQL_PASSWORD', default=password)
-        db_name = config('MYSQL_DB_NAME', default=db_name)
-        host = config('MYSQL_HOST', default=host)
-        port = config('MYSQL_PORT', default='3306')
-        mysql_url = f'mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}'
-        engine = create_engine(mysql_url)
-        engine.connect().close()
-        print("Conectado ao MySQL com sucesso.")
-        return engine
-    except Exception as e:
-        print(f"Falha ao conectar ao MySQL: {e}")
-"""    
 
 def init_db():
-    engine = get_engine()
-    try:
-        SQLModel.metadata.create_all(engine)
-        print("Banco de dados inicializado com sucesso!")
-    except Exception as e:
-        print(f"Erro ao inicializar o banco de dados: {e}")
+    # Importa os modelos para registrar suas tabelas no metadata antes do create_all.
+    from src.models.users_models import UserM  # noqa: F401
+    from src.models.testeme_user_models import User  # noqa: F401
+    from src.models.testeme_desafio_models import Desafio  # noqa: F401
+    from src.models.testeme_operacoes_models import Operacoes  # noqa: F401
+    from src.models.testeme_score_models import Score  # noqa: F401
+    from src.models.aluno_models import Aluno  # noqa: F401
+
+    SQLModel.metadata.create_all(get_engine())
+    print("Banco de dados inicializado com sucesso!")
