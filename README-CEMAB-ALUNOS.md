@@ -1,27 +1,38 @@
-# CEMAB App — alunos, vínculos, presenças e notificações
+Aqui está a documentação **atualizada e alinhada com a versão final** — com `id_log`, estrutura de lote confirmada, regras da automação e detalhes de idempotência corrigidos:
 
-Esta versão integra os dispositivos FCM aos alunos e cria a entrada para a automação externa de presença. A automação que lê o arquivo/relatório Control iD **não faz parte deste projeto**: ela será desenvolvida em outro computador e deverá chamar os endpoints descritos aqui.
+---
 
-## 1. Variáveis de ambiente
+# CEMAB App — Alunos, Vínculos, Presenças e Notificações
 
-Configure na hospedagem da API (por exemplo, Vercel):
+Esta versão integra dispositivos FCM aos alunos e implementa os endpoints de recebimento de eventos de presença para automação externa. A ferramenta que processa o relatório do Control iD **é um sistema separado**: roda em computador dedicado, lê os registros, aplica deduplicação (1ª passagem do dia) e envia eventos formatados para os endpoints abaixo.
 
-- `DATABASE_URL`: banco de dados persistente de produção (PostgreSQL recomendado).
-- `ALUNOS_ADMIN_TOKEN`: segredo para cadastrar/importar o cadastro oficial de alunos.
-- `CEMAB_EVENT_TOKEN`: segredo diferente, usado somente pela automação que envia eventos de presença.
-- Todas as variáveis de credencial do Firebase Admin SDK listadas em `.env.example`.
+---
 
-Nunca envie `ALUNOS_ADMIN_TOKEN`, `CEMAB_EVENT_TOKEN` ou credenciais Firebase no aplicativo Cordova ou em repositório público. O `CEMAB_EVENT_TOKEN` deve ficar somente no computador da automação e no ambiente da API.
+## 1. Variáveis de Ambiente
 
-As novas tabelas são criadas pelo `SQLModel.metadata.create_all`: `aluno_dispositivo` (relaciona aluno a dispositivo FCM) e `cemab_evento_presenca` (idempotência e histórico de eventos enviados). `create_all` não migra colunas de tabelas antigas, mas essas duas tabelas são novas nesta implementação.
+Configure na hospedagem da API (ex.: Vercel):
 
-## 2. Cadastro oficial dos alunos
+| Variável | Finalidade |
+|---|---|
+| `DATABASE_URL` | Banco de dados persistente (PostgreSQL recomendado) |
+| `ALUNOS_ADMIN_TOKEN` | Chave exclusiva para importação/cadastro do cadastro oficial de alunos |
+| `CEMAB_EVENT_TOKEN` | Chave **diferente da anterior**, usada SOMENTE pela automação de presença |
+| Credenciais Firebase | Conjunto listado em `.env.example` para envio de notificações FCM |
 
-A tabela de alunos começa vazia. Antes de os responsáveis poderem vincular aluno, importe o cadastro oficial.
+> ⚠️ **Nunca** exponha `ALUNOS_ADMIN_TOKEN`, `CEMAB_EVENT_TOKEN` ou credenciais Firebase no código do aplicativo Cordova nem em repositório público. O `CEMAB_EVENT_TOKEN` deve residir **apenas** no ambiente da API e no computador que executa a automação.
 
-### `POST /alunos/importar` — administrativo
+As tabelas novas são criadas automaticamente pelo `SQLModel.metadata.create_all`:
+- `aluno_dispositivo` → vínculo entre aluno e token FCM
+- `cemab_evento_presenca` → histórico e idempotência de eventos enviados
 
-Cabeçalho `X-Admin-Token: <ALUNOS_ADMIN_TOKEN>`.
+---
+
+## 2. Cadastro Oficial de Alunos
+
+A base de alunos inicia vazia. Antes de vínculos ou eventos, importe o cadastro oficial.
+
+### `POST /alunos/importar` — Administrativo
+**Cabeçalho:** `X-Admin-Token: <ALUNOS_ADMIN_TOKEN>`
 
 ```json
 {
@@ -32,21 +43,32 @@ Cabeçalho `X-Admin-Token: <ALUNOS_ADMIN_TOKEN>`.
 }
 ```
 
-Aceita até 5.000 alunos por chamada. A matrícula é normalizada sem pontos, hífens ou espaços; na consulta, o nome ignora diferenças de caixa, acentos e espaços repetidos. Se a matrícula já existir, o nome e o estado ativo são atualizados. Duplicados dentro do mesmo lote são ignorados depois da primeira ocorrência.
+- Até **5.000 alunos** por requisição
+- Matrícula normalizada: remove pontos, hífens e espaços
+- Matrícula duplicada → atualiza `nome_completo` e `ativo`
+- Duplicatas no mesmo lote → mantém a primeira ocorrência
+- Consultas por nome ignoram acentuação, caixa e espaços extras
 
-### `POST /alunos/cadastrar` — administrativo
+### `POST /alunos/cadastrar` — Administrativo
+Cadastra um único aluno, protegido pelo mesmo cabeçalho `X-Admin-Token`.
 
-Cadastra um único aluno, também protegido por `X-Admin-Token`.
+---
 
-## 3. Vínculo no aplicativo
+## 3. Vínculo no Aplicativo
 
 ### `POST /users/cadastrar`
-
-Continua registrando o token FCM. O corpo original `{ "token": "..." }` continua compatível. Opcionalmente, o app envia `{ "token": "NOVO", "token_anterior": "ANTIGO" }` quando o FCM renova o token; a API atualiza o registro ou migra os vínculos existentes para não perder a associação ao aluno.
+Registra ou atualiza token FCM. Compatível com formato simples:
+```json
+{ "token": "TOKEN_FCM" }
+```
+Ou com renovação de token:
+```json
+{ "token": "NOVO_TOKEN", "token_anterior": "TOKEN_ANTIGO" }
+```
+Atualiza vínculos existentes para não perder associações.
 
 ### `POST /alunos/vincular`
-
-Valida matrícula e nome contra o cadastro oficial e cria a associação dispositivo-aluno no servidor. O token precisa ter sido cadastrado previamente em `/users/cadastrar`.
+Valida dados contra o cadastro oficial e cria a associação aluno–dispositivo. O token deve ter sido registrado previamente.
 
 ```json
 {
@@ -56,58 +78,52 @@ Valida matrícula e nome contra o cadastro oficial e cria a associação disposi
 }
 ```
 
-Retorno de sucesso inclui `success: true`, `vinculo_ativo: true` e os dados oficiais do aluno. Dados não confirmados retornam `404`; token que ainda não foi registrado retorna `409`.
+- Sucesso → `{success: true, vinculo_ativo: true, ...dados_do_aluno}`
+- Dados não conferem → `404`
+- Token não cadastrado → `409`
 
 ### `POST /alunos/desvincular`
-
-Remove somente a relação entre o aluno e aquele token FCM:
-
+Remove somente a associação entre aluno e aquele token:
 ```json
-{"matricula": "12.345.678", "token": "TOKEN_FCM_DO_DISPOSITIVO"}
+{"matricula": "12.345.678", "token": "TOKEN_FCM"}
 ```
 
 ### `GET /alunos/vinculo`
+Retorna alunos vinculados ao dispositivo. Envie o token no cabeçalho:
+```
+X-FCM-Token: TOKEN_FCM
+```
+> Token na URL é evitado para não aparecer em logs.
 
-Retorna a lista de alunos associados a um dispositivo. Envie o token no cabeçalho `X-FCM-Token` (não na URL), para evitar que ele seja gravado nos logs de requisição.
+---
 
-## 4. Receber eventos de presença e enviar FCM
+## 4. Recebimento de Eventos de Presença
 
-A automação externa deve enviar eventos já processados, ou seja, não deve depender de a API interpretar um arquivo CSV/Excel. O endpoint aceita nomes de campos normalizados e também alguns rótulos do relatório, como `Matrícula (Usuário)`, `Nome (Usuário)`, `Data e Hora (Logs de Acesso)`, `Identificação`, `Código (Usuário)` e `Autorização (Logs de Acesso)`.
+A automação externa é responsável por:
+- Ler e interpretar o relatório do Control iD
+- Resolver matrícula (coluna Matrícula → se vazia, usa Código do Usuário)
+- Preservar **valores brutos** de `identificacao`, `codigo_usuario` e `autorizacao`
+- Deduplicação: **apenas a primeira passagem do aluno no dia** é enviada
+- Formatar `data_hora` em ISO 8601 com fuso `-03:00`
+- Enviar em lote de até 500 eventos
 
-Nas amostras fornecidas, cada linha parece conter um valor inicial de ID do log além das oito colunas descritas; confirme o cabeçalho real no computador da automação antes de mapear os campos. Algumas linhas não trazem matrícula. Nesses casos, a automação deve resolver a matrícula por uma fonte oficial autorizada ou adiar/descartar o evento; a API não adivinha a matrícula pelo nome.
+---
 
-### `POST /presencas/evento` — um evento
+### `POST /presencas/eventos` — Lote de Eventos ✅ Formato Oficial
 
-Cabeçalho obrigatório `X-CEMAB-Event-Token: <CEMAB_EVENT_TOKEN>`.
-
-```json
-{
-  "id_evento": "evento-exemplo-0001",
-  "matricula": "12.345.678",
-  "nome_completo": "NOME COMPLETO DO ALUNO",
-  "data_hora": "2026-10-11T07:35:00-03:00",
-  "identificacao": "1717658368",
-  "codigo_usuario": "156",
-  "autorizacao": "7"
-}
+**Cabeçalho obrigatório:**
+```
+X-CEMAB-Event-Token: <CEMAB_EVENT_TOKEN>
+Content-Type: application/json
 ```
 
-`data_hora` aceita ISO 8601 (recomendado, com fuso horário) ou timestamp Unix em segundos/milissegundos. O horário no exemplo é apenas ilustrativo: a automação deve enviar o horário já corrigido, conforme combinado. A API não lê nem conserta o arquivo de relatório original.
-
-A API localiza o aluno pela matrícula cadastrada. Se o aluno estiver ativo e houver dispositivos vinculados, envia a notificação FCM a cada dispositivo associado. Se o aluno não estiver cadastrado ou não tiver dispositivo vinculado, a resposta informa o motivo e não envia push. Eventos sem matrícula devem ser enriquecidos/resolvidos pela automação antes do envio; a API não tenta adivinhar o aluno só pelo nome, para evitar correspondências ambíguas.
-
-A notificação enviada contém dados FCM do tipo `presenca`: `evento_id`, `matricula`, `nome_completo`, `data_hora`, `hora_aproximada`, `titulo` e `mensagem`. Todos os campos de `data` são strings, como exige o FCM. A notificação visível informa que o aluno passou pelo reconhecimento facial e inclui o horário aproximado. Quando o Firebase retorna explicitamente que um token não está mais registrado, a API remove a associação antiga desse dispositivo para reduzir vínculos deixados por instalações desinstaladas.
-
-### `POST /presencas/eventos` — lote de eventos
-
-Cabeçalho `X-CEMAB-Event-Token`; corpo:
-
+**Corpo da requisição:**
 ```json
 {
   "eventos": [
     {
       "id_log": "log-exemplo-0001",
-      "matricula": "12.345.678",
+      "matricula": "12345678",
       "nome_completo": "NOME COMPLETO DO ALUNO",
       "data_hora": "2026-10-11T07:35:00-03:00",
       "identificacao": "1717658368",
@@ -118,29 +134,85 @@ Cabeçalho `X-CEMAB-Event-Token`; corpo:
 }
 ```
 
-Recomenda-se fornecer `id_evento` (ou `id_log`) único vindo da fonte. A API registra a chave para evitar envio duplicado quando a automação tentar novamente o mesmo evento. O lote permite até 500 eventos por requisição e devolve o resultado individual de cada um.
+#### Detalhes dos campos:
+| Campo | Descrição |
+|---|---|
+| **`id_log`** | Identificador único do evento (ex.: `linha_5_dia_2026-10-14`). Usado para idempotência — reenvio com mesmo valor é ignorado |
+| `matricula` | Sem pontos/hífens, normalizada pela automação; chave de busca no cadastro |
+| `nome_completo` | Nome do aluno, capitalizado e normalizado |
+| `data_hora` | Horário **real da passagem** em ISO 8601 com fuso `-03:00`; não fixado no início do dia |
+| `identificacao` | Valor bruto do campo "Identificação" do Control iD — preservado integralmente |
+| `codigo_usuario` | Valor bruto do "Código (Usuário)" — sem transformação |
+| `autorizacao` | Valor bruto do status de autorização — **não filtrado, não descartado**, enviado exatamente recebido |
+
+#### Comportamento da API:
+- ✅ `id_log` já registrado → evento ignorado (idempotência)
+- ✅ Aluno ativo + dispositivos vinculados → notificação FCM enviada para cada aparelho
+- ⚠️ Aluno sem vínculo ativo → registra sem erro, sem envio de push
+- ⚠️ Matrícula não encontrada → resposta com motivo, sem inferência por nome
+- ⚠️ Token FCM inválido/expirado → vínculo removido automaticamente
+- Lotes maiores que 500 → divididos pela automação
+
+---
+
+### `POST /presencas/evento` — Evento Individual (compatibilidade)
+Mantido para compatibilidade; aceita os mesmos campos de objeto. Preferir `/presencas/eventos` para processamento em massa.
+
+---
 
 ### `GET /presencas/historico`
+Recupera eventos para sincronização do aplicativo.
 
-O app usa este endpoint para recuperar notificações quando volta a abrir. Envie o token FCM no cabeçalho `X-FCM-Token` (não na URL) e, opcionalmente, `?limite=100`. O histórico retorna somente eventos de alunos ligados ao token e que tiveram envio para pelo menos um dispositivo. A leitura/não leitura é estado local do app.
+**Cabeçalho:** `X-FCM-Token: TOKEN_FCM`
+**Parâmetro opcional:** `?limite=100`
 
-## 5. Fluxo final
+Retorna apenas eventos:
+- De alunos vinculados ao dispositivo
+- Que tiveram pelo menos uma tentativa de notificação enviada
+- Sem estado de leitura (gerenciado localmente no app)
 
-1. App solicita permissão de notificação, obtém token FCM e chama `/users/cadastrar`.
-2. Responsável informa matrícula e nome completo.
-3. `/alunos/vincular` valida o aluno e grava `aluno_dispositivo` com o `user_id` do token.
-4. A automação do outro computador envia `POST /presencas/evento` ou `/presencas/eventos` com `X-CEMAB-Event-Token`.
-5. A API consulta os vínculos e envia o FCM somente aos dispositivos associados ao aluno presente.
-6. O app salva as notificações recebidas localmente, exibe o aviso em primeiro plano e sincroniza o histórico ao abrir/retomar.
+---
 
-## 6. Testes e implantação
+## 5. Fluxo Completo
 
-1. Faça backup do código e do banco em uso.
-2. Configure `DATABASE_URL`, variáveis Firebase, `ALUNOS_ADMIN_TOKEN` e `CEMAB_EVENT_TOKEN` no provedor.
-3. Publique a API.
-4. Importe o cadastro oficial via `/alunos/importar`.
-5. Instale o APK atualizado e faça o vínculo no celular real.
-6. Envie um evento de teste para `/presencas/evento` com credencial de webhook e confirme a resposta FCM.
-7. Teste app aberto, em segundo plano, fechado, toque na notificação e histórico ao reabrir.
+```
+1. App → solicita permissão de notificação → obtém token FCM
+   → POST /users/cadastrar
 
-O endpoint de webhook não deve ficar sem `CEMAB_EVENT_TOKEN`. Se não houver o segredo configurado, a API retorna `503` em vez de aceitar eventos publicamente. Matrícula e nome completo não provam, isoladamente, que a pessoa que está usando o aplicativo é responsável legal; a escola deve avaliar uma etapa de confirmação adicional antes de ampliar o acesso a dados sensíveis.
+2. Responsável → informa matrícula e nome no app
+   → POST /alunos/vincular → valida e grava vínculo
+
+3. Automação (computador dedicado):
+   ├─ Lê relatório Control iD
+   ├─ Resolve matrícula (coluna 6 → coluna 3)
+   ├─ Filtra → 1ª passagem do aluno no dia
+   ├─ Preserva todos os campos brutos
+   └─ POST /presencas/eventos → X-CEMAB-Event-Token
+
+4. API → consulta vínculos → envia FCM aos dispositivos associados
+
+5. App → recebe notificação → exibe em primeiro plano
+   └─ Sincroniza histórico ao reabrir (GET /presencas/historico)
+```
+
+---
+
+## 6. Implantação e Validação
+
+1. Fazer backup do código e do banco de dados
+2. Configurar todas as variáveis de ambiente na hospedagem
+3. Publicar a API — tabelas novas são criadas automaticamente
+4. Importar cadastro oficial via `/alunos/importar`
+5. Instalar e vincular o aplicativo em dispositivos reais
+6. **Teste de integração:**
+   ```bash
+   POST /presencas/eventos
+   X-CEMAB-Event-Token: <token>
+   Body: lote com 1 evento de exemplo
+   ```
+   Confirmar: resposta de sucesso + recebimento da notificação no app
+7. Validar cenários: app em primeiro plano, segundo plano, fechado e reabertura
+
+> ⚠️ Se `CEMAB_EVENT_TOKEN` não estiver configurado, a API retorna **`503 Service Unavailable`** para requisições de presença. A validação de matrícula e nome não constitui, por si só, comprovação de identidade do responsável — avalie etapas adicionais de confirmação conforme política da escola.
+
+---
