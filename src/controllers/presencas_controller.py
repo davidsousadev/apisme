@@ -23,7 +23,7 @@ from src.models.users_models import UserM
 from src.controllers.alunos_controller import normalizar_matricula, localizar_aluno_por_matricula
 
 router = APIRouter()
-_BRASILIA = ZoneInfo("America/Brasilia")
+_FORTALEZA = ZoneInfo("America/Fortaleza")
 
 
 def validar_token_eventos(x_cemab_event_token: str | None = Header(default=None, alias="X-CEMAB-Event-Token")):
@@ -35,7 +35,7 @@ def validar_token_eventos(x_cemab_event_token: str | None = Header(default=None,
 
 
 def _data_hora_local(valor) -> datetime:
-    """Aceita data ISO-8601 ou timestamp Unix — NÃO duplica deslocamento!"""
+    """Aceita data ISO-8601 ou timestamp Unix (segundos/milissegundos)."""
     if isinstance(valor, datetime):
         dt = valor
     elif isinstance(valor, (int, float)):
@@ -54,11 +54,11 @@ def _data_hora_local(valor) -> datetime:
             dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         else:
             dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
-            # ✅ SÓ atribui fuso se REALMENTE não tiver offset
-            if dt.tzinfo is None or dt.utcoffset() is None:
-                dt = dt.replace(tzinfo=_BRASILIA)
-    # ✅ Converte UMA vez só para o fuso de Brasilia/Teresina
-    return dt.astimezone(_BRASILIA)
+    if dt.tzinfo is None:
+        # Horários locais sem offset enviados pela automação são considerados Maranhão.
+        dt = dt.replace(tzinfo=_FORTALEZA)
+    return dt.astimezone(_FORTALEZA)
+
 
 def _texto(valor, limite=160):
     if valor is None:
