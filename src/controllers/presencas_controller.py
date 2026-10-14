@@ -35,7 +35,7 @@ def validar_token_eventos(x_cemab_event_token: str | None = Header(default=None,
 
 
 def _data_hora_local(valor) -> datetime:
-    """Aceita data ISO-8601 ou timestamp Unix (segundos/milissegundos)."""
+    """Aceita data ISO-8601 ou timestamp Unix — NÃO duplica deslocamento!"""
     if isinstance(valor, datetime):
         dt = valor
     elif isinstance(valor, (int, float)):
@@ -54,12 +54,11 @@ def _data_hora_local(valor) -> datetime:
             dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         else:
             dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
-            # ✅ SÓ aplica o fuso se NÃO tiver offset definido
-            if dt.tzinfo is None:
+            # ✅ SÓ atribui fuso se REALMENTE não tiver offset
+            if dt.tzinfo is None or dt.utcoffset() is None:
                 dt = dt.replace(tzinfo=_FORTALEZA)
-    # Converte para o fuso de Fortaleza/Teresina
+    # ✅ Converte UMA vez só para o fuso de Fortaleza/Teresina
     return dt.astimezone(_FORTALEZA)
-
 
 def _texto(valor, limite=160):
     if valor is None:
