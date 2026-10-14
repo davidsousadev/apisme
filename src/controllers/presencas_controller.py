@@ -23,7 +23,7 @@ from src.models.users_models import UserM
 from src.controllers.alunos_controller import normalizar_matricula, localizar_aluno_por_matricula
 
 router = APIRouter()
-_FORTALEZA = ZoneInfo("America/Fortaleza")
+_BRASILIA = ZoneInfo("America/Brasilia")
 
 
 def validar_token_eventos(x_cemab_event_token: str | None = Header(default=None, alias="X-CEMAB-Event-Token")):
@@ -56,9 +56,9 @@ def _data_hora_local(valor) -> datetime:
             dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
             # ✅ SÓ atribui fuso se REALMENTE não tiver offset
             if dt.tzinfo is None or dt.utcoffset() is None:
-                dt = dt.replace(tzinfo=_FORTALEZA)
-    # ✅ Converte UMA vez só para o fuso de Fortaleza/Teresina
-    return dt.astimezone(_FORTALEZA)
+                dt = dt.replace(tzinfo=_BRASILIA)
+    # ✅ Converte UMA vez só para o fuso de Brasilia/Teresina
+    return dt.astimezone(_BRASILIA)
 
 def _texto(valor, limite=160):
     if valor is None:
