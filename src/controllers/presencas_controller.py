@@ -54,11 +54,11 @@ def _data_hora_local(valor) -> datetime:
             dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         else:
             dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
-    if dt.tzinfo is None:
-        # Horários locais sem offset enviados pela automação são considerados Maranhão.
-        dt = dt.replace(tzinfo=_FORTALEZA)
+            # ✅ CORREÇÃO: SÓ atribui fuso se REALMENTE não tiver
+            if dt.tzinfo is None or dt.utcoffset() is None:
+                dt = dt.replace(tzinfo=_FORTALEZA)
+    # ✅ Converte para o fuso local APENAS no final
     return dt.astimezone(_FORTALEZA)
-
 
 def _texto(valor, limite=160):
     if valor is None:
