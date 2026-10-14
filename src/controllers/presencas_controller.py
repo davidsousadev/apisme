@@ -54,11 +54,12 @@ def _data_hora_local(valor) -> datetime:
             dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         else:
             dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
-            # ✅ CORREÇÃO: SÓ atribui fuso se REALMENTE não tiver
-            if dt.tzinfo is None or dt.utcoffset() is None:
+            # ✅ SÓ aplica o fuso se NÃO tiver offset definido
+            if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=_FORTALEZA)
-    # ✅ Converte para o fuso local APENAS no final
+    # Converte para o fuso de Fortaleza/Teresina
     return dt.astimezone(_FORTALEZA)
+
 
 def _texto(valor, limite=160):
     if valor is None:
