@@ -4,7 +4,7 @@ transforma arquivos/relatórios Control iD.
 """
 import hashlib
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from decouple import config
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -22,8 +22,11 @@ from src.controllers.alunos_controller import normalizar_matricula, localizar_al
 router = APIRouter()
 
 # Fuso de exibição (Fortaleza/Teresina/Brasília = UTC-3)
-_FUSO_LOCAL = ZoneInfo("America/Fortaleza")
+_FUSO_EXIBICAO = ZoneInfo("America/Fortaleza")
 _UTC = timezone.utc
+
+# ✅ Correção direta: soma 3h na exibição para compensar
+AJUSTE_EXIBICAO = timedelta(hours=3)
 
 def validar_token_eventos(x_cemab_event_token: str | None = Header(default=None, alias="X-CEMAB-Event-Token")):
     segredo = config("CEMAB_EVENT_TOKEN", default="").strip() or config("PRESENCA_WEBHOOK_TOKEN", default="").strip()
@@ -33,11 +36,7 @@ def validar_token_eventos(x_cemab_event_token: str | None = Header(default=None,
         raise HTTPException(status_code=401, detail="Credencial do webhook inválida.")
 
 def _data_hora_local(valor) -> datetime:
-    """
-    Entrada → Tratamento → Saída sempre em UTC
-    - Com offset: respeita e converte → UTC
-    - Sem offset: considera horário local (-03) → converte → UTC
-    """
+    """Aceita data ISO-8601 ou timestamp Unix. Retorna em UTC para o banco."""
     if isinstance(valor, datetime):
         dt = valor
     elif isinstance(valor, (int, float)):
@@ -56,11 +55,8 @@ def _data_hora_local(valor) -> datetime:
             dt = datetime.fromtimestamp(timestamp, tz=_UTC)
         else:
             dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
-            # ✅ SEM offset = horário local da escola → atribui -03:00
             if dt.tzinfo is None or dt.utcoffset() is None:
-                dt = dt.replace(tzinfo=_FUSO_LOCAL)
-    
-    # ✅ Agora converte para UTC — banco guarda sempre +00:00
+                dt = dt.replace(tzinfo=_FUSO_EXIBICAO)
     return dt.astimezone(_UTC)
 
 def _texto(valor, limite=160):
@@ -80,9 +76,9 @@ def _external_id(dados: EventoPresencaRequest, matricula: str, dt: datetime) -> 
     return "sha256:" + hashlib.sha256(identificador.encode("utf-8")).hexdigest()
 
 def _mensagem_presenca(nome: str, dt: datetime) -> tuple[str, str]:
-    """Converte UTC recebido → horário local para exibição no app/push."""
-    dt_local = dt.astimezone(_FUSO_LOCAL)
-    hora = dt_local.strftime("%H:%M")
+    """✅ Soma 3h direto na hora mostrada na notificação"""
+    dt_ajustada = dt.astimezone(_FUSO_EXIBICAO) + AJUSTE_EXIBICAO
+    hora = dt_ajustada.strftime("%H:%M")
     return "Presença registrada na escola", f"{nome} passou pelo reconhecimento facial às {hora}."
 
 def _enviar_push(token: str, dados: dict, titulo: str, mensagem_texto: str):
@@ -121,7 +117,7 @@ def _processar_evento(dados: EventoPresencaRequest) -> dict:
         return {"success": False, "status": "data_hora_invalida", "matricula": matricula, "detail": str(exc)}
     
     external_id = _external_id(dados, matricula, dt)
-    data_iso = dt.isoformat()  # Salva em UTC
+    data_iso = dt.isoformat()  # Banco continua igual
     identificacao = _texto(dados.identificacao, 80)
     codigo_usuario = _texto(dados.codigo_usuario, 80)
     autorizacao = _texto(dados.autorizacao, 80)
@@ -199,14 +195,18 @@ def _processar_evento(dados: EventoPresencaRequest) -> dict:
             raise HTTPException(status_code=503, detail="O serviço de notificações Firebase não está configurado corretamente no servidor.") from exc
         
         titulo, mensagem_texto = _mensagem_presenca(aluno.nome_completo, dt)
+        
+        # ✅ Hora ajustada também no payload para o app
+        hora_ajustada = (dt.astimezone(_FUSO_EXIBICAO) + AJUSTE_EXIBICAO).strftime("%H:%M")
+        
         data_payload = {
             "tipo": "presenca",
             "evento_id": external_id,
             "open_notification": "1",
             "matricula": aluno.matricula,
             "nome_completo": aluno.nome_completo,
-            "data_hora": data_iso,  # UTC
-            "hora_aproximada": dt.astimezone(_FUSO_LOCAL).strftime("%H:%M"),  # Local
+            "data_hora": data_iso,  # UTC — banco igual
+            "hora_aproximada": hora_ajustada,  # ✅ +3h para mostrar certo
             "titulo": titulo,
             "mensagem": mensagem_texto,
             "identificacao": identificacao or "",
@@ -299,11 +299,11 @@ def historico_notificacoes(
         for evento in eventos:
             try:
                 dt = _data_hora_local(evento.data_hora)
-                dt_local = dt.astimezone(_FUSO_LOCAL)
-                hora = dt_local.strftime("%H:%M")
+                # ✅ Mesmo ajuste no histórico
+                dt_ajustada = dt.astimezone(_FUSO_EXIBICAO) + AJUSTE_EXIBICAO
+                hora = dt_ajustada.strftime("%H:%M")
                 titulo, corpo = _mensagem_presenca(evento.nome_completo, dt)
             except (ValueError, TypeError, OverflowError, OSError):
-                dt_local = None
                 hora = "Não informado"
                 titulo = "Presença registrada na escola"
                 corpo = f"{evento.nome_completo} teve um registro de presença na escola."
@@ -321,8 +321,8 @@ def historico_notificacoes(
                 "mensagem": corpo,
                 "matricula": evento.matricula,
                 "nome_completo": evento.nome_completo,
-                "data_hora": evento.data_hora,
-                "hora_aproximada": hora,
+                "data_hora": evento.data_hora,  # Sem alteração
+                "hora_aproximada": hora,  # ✅ Ajustada
                 "recebida_em": recebida_em.isoformat(),
                 "lida": False,
             })
