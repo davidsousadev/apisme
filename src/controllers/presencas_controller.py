@@ -21,9 +21,8 @@ from src.controllers.alunos_controller import normalizar_matricula, localizar_al
 
 router = APIRouter()
 
-# ✅ Fuso de exibição (Fortaleza/Teresina/Brasília = UTC-3)
-_FUSO_EXIBICAO = ZoneInfo("America/Fortaleza")
-# ✅ Armazenamento sempre em UTC
+# Fuso de exibição (Fortaleza/Teresina/Brasília = UTC-3)
+_FUSO_LOCAL = ZoneInfo("America/Fortaleza")
 _UTC = timezone.utc
 
 def validar_token_eventos(x_cemab_event_token: str | None = Header(default=None, alias="X-CEMAB-Event-Token")):
@@ -34,7 +33,11 @@ def validar_token_eventos(x_cemab_event_token: str | None = Header(default=None,
         raise HTTPException(status_code=401, detail="Credencial do webhook inválida.")
 
 def _data_hora_local(valor) -> datetime:
-    """Aceita data ISO-8601 ou timestamp Unix. Retorna EM UTC para armazenamento."""
+    """
+    Entrada → Tratamento → Saída sempre em UTC
+    - Com offset: respeita e converte → UTC
+    - Sem offset: considera horário local (-03) → converte → UTC
+    """
     if isinstance(valor, datetime):
         dt = valor
     elif isinstance(valor, (int, float)):
@@ -53,10 +56,11 @@ def _data_hora_local(valor) -> datetime:
             dt = datetime.fromtimestamp(timestamp, tz=_UTC)
         else:
             dt = datetime.fromisoformat(texto.replace("Z", "+00:00"))
-            # ✅ SÓ atribui fuso local se REALMENTE não tiver nenhum offset
+            # ✅ SEM offset = horário local da escola → atribui -03:00
             if dt.tzinfo is None or dt.utcoffset() is None:
-                dt = dt.replace(tzinfo=_FUSO_EXIBICAO)
-    # ✅ Converte TUDO para UTC antes de retornar → banco sempre recebe 00:00
+                dt = dt.replace(tzinfo=_FUSO_LOCAL)
+    
+    # ✅ Agora converte para UTC — banco guarda sempre +00:00
     return dt.astimezone(_UTC)
 
 def _texto(valor, limite=160):
@@ -76,8 +80,8 @@ def _external_id(dados: EventoPresencaRequest, matricula: str, dt: datetime) -> 
     return "sha256:" + hashlib.sha256(identificador.encode("utf-8")).hexdigest()
 
 def _mensagem_presenca(nome: str, dt: datetime) -> tuple[str, str]:
-    """Converte UTC para horário local de exibição."""
-    dt_local = dt.astimezone(_FUSO_EXIBICAO)
+    """Converte UTC recebido → horário local para exibição no app/push."""
+    dt_local = dt.astimezone(_FUSO_LOCAL)
     hora = dt_local.strftime("%H:%M")
     return "Presença registrada na escola", f"{nome} passou pelo reconhecimento facial às {hora}."
 
@@ -117,7 +121,7 @@ def _processar_evento(dados: EventoPresencaRequest) -> dict:
         return {"success": False, "status": "data_hora_invalida", "matricula": matricula, "detail": str(exc)}
     
     external_id = _external_id(dados, matricula, dt)
-    data_iso = dt.isoformat()  # ✅ Salva em UTC
+    data_iso = dt.isoformat()  # Salva em UTC
     identificacao = _texto(dados.identificacao, 80)
     codigo_usuario = _texto(dados.codigo_usuario, 80)
     autorizacao = _texto(dados.autorizacao, 80)
@@ -202,7 +206,7 @@ def _processar_evento(dados: EventoPresencaRequest) -> dict:
             "matricula": aluno.matricula,
             "nome_completo": aluno.nome_completo,
             "data_hora": data_iso,  # UTC
-            "hora_aproximada": dt.astimezone(_FUSO_EXIBICAO).strftime("%H:%M"),  # Horário local
+            "hora_aproximada": dt.astimezone(_FUSO_LOCAL).strftime("%H:%M"),  # Local
             "titulo": titulo,
             "mensagem": mensagem_texto,
             "identificacao": identificacao or "",
@@ -295,7 +299,7 @@ def historico_notificacoes(
         for evento in eventos:
             try:
                 dt = _data_hora_local(evento.data_hora)
-                dt_local = dt.astimezone(_FUSO_EXIBICAO)
+                dt_local = dt.astimezone(_FUSO_LOCAL)
                 hora = dt_local.strftime("%H:%M")
                 titulo, corpo = _mensagem_presenca(evento.nome_completo, dt)
             except (ValueError, TypeError, OverflowError, OSError):
@@ -317,7 +321,7 @@ def historico_notificacoes(
                 "mensagem": corpo,
                 "matricula": evento.matricula,
                 "nome_completo": evento.nome_completo,
-                "data_hora": evento.data_hora,  # UTC
+                "data_hora": evento.data_hora,
                 "hora_aproximada": hora,
                 "recebida_em": recebida_em.isoformat(),
                 "lida": False,
