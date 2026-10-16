@@ -106,3 +106,19 @@ class EventoPresencaRequest(BaseModel):
 
 class EventoPresencaLoteRequest(BaseModel):
     eventos: list[EventoPresencaRequest] = PydanticField(min_length=1, max_length=500)
+
+
+class NotificacaoAdministrativa(SQLModel, table=True):
+    """Histórico persistente de notificações enviadas pela área administrativa."""
+    __tablename__ = "cemab_notificacao_admin"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    external_id: str = Field(index=True, unique=True, max_length=140)
+    tipo: str = Field(index=True, max_length=30)
+    titulo: str = Field(max_length=120)
+    mensagem: str = Field(max_length=1000)
+    aluno_id: Optional[int] = Field(default=None, foreign_key="aluno.id", index=True)
+    matricula: Optional[str] = Field(default=None, index=True, max_length=40)
+    nome_completo: Optional[str] = Field(default=None, max_length=160)
+    data_referencia: Optional[str] = Field(default=None, index=True, max_length=10)
+    tokens_enviados: int = Field(default=0)
+    criado_em: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
