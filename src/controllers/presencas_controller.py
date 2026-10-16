@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 from src.database import get_engine
 from src.firebase_service import ensure_firebase_app
 from src.models.aluno_models import (
-    Aluno, AlunoDispositivo, EventoPresenca, EventoPresencaLoteRequest,
+    Aluno, AlunoDispositivo, EventoPresenca, NotificacaoAdministrativa, EventoPresencaLoteRequest,
     EventoPresencaRequest,
 )
 from src.models.users_models import UserM
@@ -125,7 +125,7 @@ def _processar_evento(dados: EventoPresencaRequest) -> dict:
     with Session(get_engine()) as session:
         existente = session.exec(select(EventoPresenca).where(EventoPresenca.external_id == external_id)).first()
         
-        if existente and existente.envio_status in {"enviado", "parcial"}:
+        if existente and existente.envio_status in {"enviado", "parcial", "presenca_registrada"}:
             return {
                 "success": existente.envio_status in {"enviado", "parcial"},
                 "duplicado": True,
@@ -172,89 +172,26 @@ def _processar_evento(dados: EventoPresencaRequest) -> dict:
             session.add(evento)
             session.commit()
             return {"success": False, "evento_id": external_id, "matricula": matricula, "status": "aluno_nao_cadastrado", "detail": "A matrícula não consta no cadastro de alunos ativos."}
-        
-        links = session.exec(select(AlunoDispositivo).where(AlunoDispositivo.aluno_id == aluno.id)).all()
-        tokens = []
-        for link in links:
-            user = session.get(UserM, link.user_id)
-            if user and user.token and user.token not in tokens:
-                tokens.append(user.token)
-        
-        if not tokens:
-            evento.envio_status = "sem_vinculo"
-            session.add(evento)
-            session.commit()
-            return {"success": True, "evento_id": external_id, "matricula": matricula, "status": "sem_vinculo", "tokens_destino": 0, "tokens_enviados": 0}
-        
-        try:
-            ensure_firebase_app()
-        except Exception as exc:
-            evento.envio_status = "erro_firebase"
-            session.add(evento)
-            session.commit()
-            raise HTTPException(status_code=503, detail="O serviço de notificações Firebase não está configurado corretamente no servidor.") from exc
-        
-        titulo, mensagem_texto = _mensagem_presenca(aluno.nome_completo, dt)
-        
-        # ✅ Hora ajustada também no payload para o app
-        hora_ajustada = (dt.astimezone(_FUSO_EXIBICAO) + AJUSTE_EXIBICAO).strftime("%H:%M")
-        
-        data_payload = {
-            "tipo": "presenca",
-            "evento_id": external_id,
-            "open_notification": "1",
-            "matricula": aluno.matricula,
-            "nome_completo": aluno.nome_completo,
-            "data_hora": data_iso,  # UTC — banco igual
-            "hora_aproximada": hora_ajustada,  # ✅ +3h para mostrar certo
-            "titulo": titulo,
-            "mensagem": mensagem_texto,
-            "identificacao": identificacao or "",
-            "codigo_usuario": codigo_usuario or "",
-            "autorizacao": autorizacao or "",
-        }
-        
-        enviados = 0
-        erros = []
-        for token in tokens:
-            try:
-                _enviar_push(token, data_payload, titulo, mensagem_texto)
-                enviados += 1
-            except Exception as exc:
-                erro_tipo = type(exc).__name__
-                if erro_tipo == "UnregisteredError":
-                    _remover_token_fcm_invalido(session, token)
-                erros.append(erro_tipo)
-        
-        evento.tokens_enviados = enviados
-        if enviados == len(tokens):
-            evento.envio_status = "enviado"
-        elif enviados > 0:
-            evento.envio_status = "parcial"
-        else:
-            evento.envio_status = "erro"
-        
+
+        # A API registra as passagens, mas NÃO envia mais push de presença.
+        # As notificações serão de falta ou avisos personalizados pela área administrativa.
+        evento.envio_status = "presenca_registrada"
+        evento.tokens_enviados = 0
         session.add(evento)
         session.commit()
-        
         return {
-            "success": enviados > 0,
-            "evento_id": external_id,
-            "matricula": aluno.matricula,
-            "status": evento.envio_status,
-            "tokens_destino": len(tokens),
-            "tokens_enviados": enviados,
-            "erros": erros,
+            "success": True, "evento_id": external_id, "matricula": aluno.matricula,
+            "status": "presenca_registrada", "tokens_destino": 0, "tokens_enviados": 0,
         }
 
 @router.post("/evento", status_code=status.HTTP_200_OK, dependencies=[Depends(validar_token_eventos)])
 def receber_evento(dados: EventoPresencaRequest):
-    """Recebe uma presença processada e notifica os dispositivos do aluno."""
+    """Recebe e registra uma passagem; não envia push de presença."""
     return _processar_evento(dados)
 
 @router.post("/eventos", status_code=status.HTTP_200_OK, dependencies=[Depends(validar_token_eventos)])
 def receber_lote(dados: EventoPresencaLoteRequest):
-    """Recebe um lote de presenças já processadas pela automação externa."""
+    """Recebe e registra um lote de passagens para cálculo posterior de faltas."""
     resultados = []
     for evento in dados.eventos:
         try:
@@ -262,7 +199,7 @@ def receber_lote(dados: EventoPresencaLoteRequest):
         except HTTPException as exc:
             resultados.append({"success": False, "status": "erro", "matricula": evento.matricula, "detail": exc.detail})
     return {
-        "success": all(item.get("success", False) or item.get("status") in {"sem_vinculo", "duplicado"} for item in resultados),
+        "success": all(item.get("success", False) or item.get("status") in {"sem_vinculo", "duplicado", "presenca_registrada"} for item in resultados),
         "total_recebido": len(dados.eventos),
         "notificados": sum(1 for item in resultados if item.get("status") in {"enviado", "parcial"}),
         "resultados": resultados,
@@ -327,4 +264,23 @@ def historico_notificacoes(
                 "lida": False,
             })
         
-        return {"success": True, "notificacoes": notificacoes}
+        # Acrescenta faltas e avisos enviados pela área administrativa para os alunos vinculados.
+        administrativas = session.exec(
+            select(NotificacaoAdministrativa)
+            .where(NotificacaoAdministrativa.aluno_id.in_(aluno_ids))
+            .order_by(NotificacaoAdministrativa.criado_em.desc())
+            .limit(limite)
+        ).all() if aluno_ids else []
+        for item in administrativas:
+            criado = item.criado_em
+            if criado.tzinfo is None:
+                criado = criado.replace(tzinfo=_UTC)
+            notificacoes.append({
+                "evento_id": item.external_id, "tipo": item.tipo, "titulo": item.titulo,
+                "mensagem": item.mensagem, "matricula": item.matricula or "",
+                "nome_completo": item.nome_completo or "", "data_hora": "",
+                "hora_aproximada": "", "recebida_em": criado.astimezone(_UTC).isoformat(),
+                "lida": False, "data_referencia": item.data_referencia,
+            })
+        notificacoes.sort(key=lambda item: item.get("recebida_em", ""), reverse=True)
+        return {"success": True, "notificacoes": notificacoes[:limite]}
